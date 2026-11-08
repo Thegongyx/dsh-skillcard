@@ -16,18 +16,73 @@
  *
  * All card data goes through the host bridge in `index.js`.
  */
-window.__ModuleLoader__.load({
-  id: 'dsh-skillcard',
-  factory(require) {
-    const React = require('react')
-    const h = React.createElement
+import * as ReactRuntime from 'react'
+import * as ReactDomRuntime from 'react-dom'
+import {
+  VAR_CANONICAL,
+  SKILL_TOKEN_PATTERN,
+  canonicalTemplate,
+  emptyValues,
+  missingNames,
+  renderTemplate,
+  templateVariables,
+  type Card,
+  type CardVariable,
+  type RunRecord,
+  type RunStatus,
+  type PluginConfig,
+} from './shared'
+import type {
+  CardInput,
+  ClientContext,
+  FooterProps,
+  ModelCatalogLike,
+  ModelGroupLike,
+  PageProps,
+  PresetLike,
+  RemoteApi,
+  RemoteResult,
+  RunEntryInput,
+  RunFinished,
+  RunMeta,
+  Runner,
+  RunnerOptions,
+  RunnerPhase,
+  SessionSummaryLike,
+  SessionsSnapshotLike,
+  SkillEntryLike,
+  Store,
+  StoreSnapshot,
+  Translate,
+  UiWorkspaceApi,
+  WaitValue,
+  WorkspaceSnapshotLike,
+  WorkspaceViewLike,
+} from './client-types'
+import type {
+  RunTargetProps,
+  RunResultProps,
+  BoundaryProps,
+  PanelIconProps,
+  ChevronProps,
+  TemplateTextProps,
+  CardEditorProps,
+  CardDetailProps,
+  AiFormProps,
+  CardPickerProps,
+} from './client-types'
+
+
+    // The page module table owns react; this bundle resolves it through the loader.
+    const React = ReactRuntime
+    const h: typeof React.createElement = React.createElement
 
     const NS = 'skillcard'
     const PANEL_ID = 'skillcards'
     const API = '/api/dsh-skillcard'
-    const VAR_RE = /\$\{([^{}\n]+)\}/g
+    const VAR_RE = VAR_CANONICAL
     /** Same grammar the host's skill-gesture scan uses for a `/name` token. */
-    const SKILL_TOKEN_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+    const SKILL_TOKEN_RE = SKILL_TOKEN_PATTERN
 
     // ---------------------------------------------------------------- locale
     const zh = {
@@ -262,69 +317,36 @@ window.__ModuleLoader__.load({
     }
 
     // --------------------------------------------------------------- helpers
-    function variableNames(template) {
-      const names = []
-      const seen = new Set()
-      for (const match of String(template ?? '').matchAll(VAR_RE)) {
-        const name = String(match[1] ?? '').trim()
-        if (name === '' || seen.has(name)) continue
-        seen.add(name)
-        names.push(name)
-      }
-      return names
-    }
-
-    function renderTemplate(template, values) {
-      return String(template ?? '').replace(VAR_RE, (match, raw) => {
-        const name = String(raw).trim()
-        const value = values === undefined ? undefined : values[name]
-        return value === undefined || value === '' ? match : String(value)
-      })
-    }
-
-    function missingNames(template, values) {
-      return variableNames(template).filter((name) => {
-        const value = values === undefined ? undefined : values[name]
-        return value === undefined || String(value).trim() === ''
-      })
-    }
-
-    function emptyValues(card) {
-      const values = {}
-      for (const name of variableNames(card.template)) values[name] = ''
-      return values
-    }
-
-    function messageOf(error) {
+    function messageOf(error: unknown): string {
       if (error instanceof Error) return error.message
       return String(error ?? 'unknown error')
     }
 
-    function uid() {
+    function uid(): string {
       const globalCrypto = typeof crypto === 'object' && crypto !== null ? crypto : undefined
       if (globalCrypto !== undefined && typeof globalCrypto.randomUUID === 'function') return globalCrypto.randomUUID()
       return 'sc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)
     }
 
-    function unwrap(result) {
+    function unwrap<T>(result: unknown): T {
       if (result !== null && typeof result === 'object' && 'ok' in result) {
-        if (result.ok === false) throw new Error(result.error?.message ?? result.error?.code ?? 'request failed')
-        return result.value
+        const envelope = result as { ok?: unknown; value?: unknown; error?: { message?: string; code?: string } }
+        if (envelope.ok === false) {
+          throw new Error(envelope.error?.message ?? envelope.error?.code ?? 'request failed')
+        }
+        return envelope.value as T
       }
-      return result
+      return result as T
     }
 
+    type PortalFn = (children: React.ReactNode, container: Element) => React.ReactElement
     /** Body portal for floating surfaces; falls back to inline rendering. */
-    const portal = (() => {
-      try {
-        const reactDom = require('react-dom')
-        return typeof reactDom?.createPortal === 'function' ? reactDom.createPortal.bind(reactDom) : undefined
-      } catch {
-        return undefined
-      }
-    })()
+    const portal: PortalFn | undefined =
+      typeof ReactDomRuntime?.createPortal === 'function'
+        ? (ReactDomRuntime.createPortal as unknown as PortalFn).bind(ReactDomRuntime)
+        : undefined
 
-    function renderBodyPortal(children) {
+    function renderBodyPortal(children: React.ReactNode): React.ReactNode {
       if (typeof portal !== 'function' || typeof document === 'undefined' || document === null) return children
       const body = document.body
       if (body === null || body === undefined) return children
@@ -335,8 +357,15 @@ window.__ModuleLoader__.load({
       }
     }
 
-    async function request(path, body) {
-      const options =
+    interface Envelope<T> {
+      ok?: boolean
+      value?: T
+      message?: string
+      error?: string
+    }
+
+    async function request<T = unknown>(path: string, body?: unknown): Promise<T> {
+      const options: RequestInit =
         body === undefined
           ? { method: 'GET', headers: { accept: 'application/json' } }
           : {
@@ -344,15 +373,15 @@ window.__ModuleLoader__.load({
               headers: { 'content-type': 'application/json', accept: 'application/json' },
               body: JSON.stringify(body),
             }
-      let response
+      let response: Response
       try {
         response = await window.fetch(API + path, options)
       } catch (error) {
         throw new Error('network error: ' + messageOf(error))
       }
-      let data = null
+      let data: Envelope<T> | null = null
       try {
-        data = await response.json()
+        data = (await response.json()) as Envelope<T>
       } catch {
         data = null
       }
@@ -360,14 +389,32 @@ window.__ModuleLoader__.load({
         throw new Error(data === null ? `HTTP ${response.status}` : (data.message ?? data.error ?? `HTTP ${response.status}`))
       }
       if (data !== null && data.ok === false) throw new Error(data.message ?? 'request failed')
-      return data === null ? null : data.value
+      return (data === null ? null : (data.value as T)) as T
     }
 
     // ----------------------------------------------------------------- store
-    const DEFAULT_CONFIG = { defaultExpanded: true, showSidebarEntry: true }
+    const DEFAULT_CONFIG: PluginConfig = { defaultExpanded: true, showSidebarEntry: true }
 
-    function createStore(remote) {
-      let state = {
+    interface CardsPayload {
+      cards?: Card[]
+      config?: Partial<PluginConfig>
+    }
+    interface SavePayload {
+      cards?: Card[]
+      card?: Card
+    }
+    interface RunsPayload {
+      runs?: RunRecord[]
+    }
+    interface SkillsPayload {
+      skills?: SkillEntryLike[]
+    }
+    interface DeletedPayload {
+      deleted?: number
+    }
+
+    function createStore(remote: RemoteApi | undefined): Store {
+      let state: StoreSnapshot = {
         status: 'idle',
         error: '',
         cards: [],
@@ -380,23 +427,23 @@ window.__ModuleLoader__.load({
         runsStatus: 'idle',
         popoverRequest: null,
       }
-      const listeners = new Set()
-      let inflight = null
-      let noticeTimer = undefined
+      const listeners = new Set<() => void>()
+      let inflight: Promise<void> | null = null
+      let noticeTimer: number | undefined = undefined
 
-      const get = () => state
-      const emit = () => {
+      const get = (): StoreSnapshot => state
+      const emit = (): void => {
         for (const listener of Array.from(listeners)) listener()
       }
-      const set = (patch) => {
+      const set = (patch: Partial<StoreSnapshot>): void => {
         state = { ...state, ...patch }
         emit()
       }
 
-      function refresh() {
+      function refresh(): Promise<void> {
         if (inflight !== null) return inflight
         if (state.status !== 'ready') set({ status: 'loading', error: '' })
-        inflight = request('/cards')
+        inflight = request<CardsPayload>('/cards')
           .then((value) => {
             const cards = Array.isArray(value?.cards) ? value.cards : []
             const selected = cards.some((card) => card.id === state.selectedId) ? state.selectedId : null
@@ -408,7 +455,7 @@ window.__ModuleLoader__.load({
               config: { ...DEFAULT_CONFIG, ...(value?.config ?? {}) },
             })
           })
-          .catch((error) => {
+          .catch((error: unknown) => {
             set({ status: 'error', error: messageOf(error) })
           })
           .finally(() => {
@@ -417,7 +464,7 @@ window.__ModuleLoader__.load({
         return inflight
       }
 
-      function notify(text) {
+      function notify(text: string): void {
         set({ notice: text })
         if (noticeTimer !== undefined) window.clearTimeout(noticeTimer)
         noticeTimer = window.setTimeout(() => {
@@ -426,16 +473,16 @@ window.__ModuleLoader__.load({
         }, 2200)
       }
 
-      function draftOf(id) {
+      function draftOf(id: string): Record<string, string> {
         return state.drafts[id] ?? {}
       }
 
       /** Load execution history for one card ('' = the latest runs across cards). */
-      async function refreshRuns(cardId) {
+      async function refreshRuns(cardId?: string): Promise<void> {
         const key = typeof cardId === 'string' ? cardId : ''
         set({ runsStatus: 'loading', runsCardId: key })
         try {
-          const value = await request('/runs' + (key === '' ? '' : '?cardId=' + encodeURIComponent(key)))
+          const value = await request<RunsPayload>('/runs' + (key === '' ? '' : '?cardId=' + encodeURIComponent(key)))
           set({ runs: Array.isArray(value?.runs) ? value.runs : [], runsStatus: 'ready' })
         } catch {
           set({ runs: [], runsStatus: 'error' })
@@ -443,100 +490,101 @@ window.__ModuleLoader__.load({
       }
 
       return {
-        subscribe(listener) {
+        subscribe(listener: () => void) {
           listeners.add(listener)
           return () => listeners.delete(listener)
         },
         get,
         refresh,
         notify,
-        select(id) {
+        select(id: string) {
           set({ selectedId: id })
         },
         clearSelection() {
           set({ selectedId: null })
         },
         draftOf,
-        setValue(cardId, name, value) {
+        setValue(cardId: string, name: string, value: string) {
           const current = state.drafts[cardId] ?? {}
           set({ drafts: { ...state.drafts, [cardId]: { ...current, [name]: value } } })
         },
-        resetValues(cardId) {
+        resetValues(cardId: string) {
           const card = state.cards.find((item) => item.id === cardId)
           if (card === undefined) return
           set({ drafts: { ...state.drafts, [cardId]: emptyValues(card) } })
         },
-        async saveCard(input) {
-          const value = await request('/save', { card: input })
-          set({ cards: value.cards ?? state.cards })
-          if (value.card !== undefined) {
+        async saveCard(input: CardInput): Promise<Card | undefined> {
+          const value = await request<SavePayload>('/save', { card: input })
+          const card = value?.card
+          set({ cards: value?.cards ?? state.cards })
+          if (card !== undefined) {
             const drafts = { ...state.drafts }
-            const merged = emptyValues(value.card)
-            for (const name of Object.keys(merged)) merged[name] = state.drafts[value.card.id]?.[name] ?? ''
-            drafts[value.card.id] = merged
-            set({ selectedId: value.card.id, drafts })
+            const merged = emptyValues(card)
+            for (const name of Object.keys(merged)) merged[name] = state.drafts[card.id]?.[name] ?? ''
+            drafts[card.id] = merged
+            set({ selectedId: card.id, drafts })
           }
-          return value.card
+          return card
         },
-        async removeCard(id) {
-          const value = await request('/delete', { id })
-          const cards = value.cards ?? state.cards
+        async removeCard(id: string): Promise<void> {
+          const value = await request<CardsPayload>('/delete', { id })
+          const cards = value?.cards ?? state.cards
           const drafts = { ...state.drafts }
           delete drafts[id]
           set({ cards, drafts, selectedId: state.selectedId === id ? null : state.selectedId })
         },
-        async markUsed(id) {
+        async markUsed(id: string): Promise<void> {
           try {
-            await request('/use', { id })
+            await request<SavePayload>('/use', { id })
           } catch {
             // usage counting is best-effort
           }
         },
         /** Ask the sidebar popover to open on one card (management → use hand-off). */
-        requestPopover(cardId) {
+        requestPopover(cardId: string) {
           const seq = (state.popoverRequest?.seq ?? 0) + 1
           set({ selectedId: cardId, popoverRequest: { cardId, seq } })
         },
-        async refreshRuns(cardId) {
+        async refreshRuns(cardId?: string) {
           await refreshRuns(cardId)
         },
-        async recordRun(entry) {
+        async recordRun(entry: RunEntryInput): Promise<boolean> {
           try {
-            await request('/runs/record', { run: entry })
+            await request<RunsPayload>('/runs/record', { run: entry })
             await refreshRuns(typeof entry?.cardId === 'string' ? entry.cardId : '')
             return true
           } catch {
             return false
           }
         },
-        async deleteRuns(ids) {
+        async deleteRuns(ids: string[]): Promise<number> {
           const wanted = (Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string')
-          if (wanted.length === 0) return
-          const value = await request('/runs/delete', { ids: wanted })
+          if (wanted.length === 0) return 0
+          const value = await request<DeletedPayload>('/runs/delete', { ids: wanted })
           set({ runs: state.runs.filter((run) => !wanted.includes(run.id)) })
           return value?.deleted ?? 0
         },
-        async skills(sessionId) {
+        async skills(sessionId?: string) {
           // The Session's own composition is what the `/` menu lists; the bridge
           // route is the session-less fallback (a live agent's layer chain, or the
           // global layer when nothing is running).
-          if (typeof sessionId === 'string' && sessionId !== '' && remote !== undefined) {
+          if (typeof sessionId === 'string' && sessionId !== '' && remote?.skills !== undefined) {
             try {
-              const value = unwrap(await remote.skills.list({ sessionId }))
+              const value = unwrap<SkillsPayload>(await remote.skills.list({ sessionId }))
               const list = Array.isArray(value?.skills) ? value.skills : []
               if (list.length > 0) return { skills: list, scoped: true }
             } catch {
               // fall through to the host catalog
             }
           }
-          const value = await request('/skills')
+          const value = await request<SkillsPayload>('/skills')
           return { skills: Array.isArray(value?.skills) ? value.skills : [], scoped: false }
         },
       }
     }
 
     /** Subscribe a component to the whole store snapshot (replaced on every change). */
-    function useSnapshot(store) {
+    function useSnapshot(store: Store): StoreSnapshot {
       const [snapshot, setSnapshot] = React.useState(() => store.get())
       React.useEffect(() => {
         setSnapshot(store.get())
@@ -547,9 +595,12 @@ window.__ModuleLoader__.load({
 
     // ------------------------------------------------------------------ runner
     /** Concatenate the text blocks of one assistant message surface. */
-    function assistantText(message) {
-      const blocks = message !== null && typeof message === 'object' && Array.isArray(message.content) ? message.content : []
-      const parts = []
+    function assistantText(message: unknown): string {
+      const blocks =
+        message !== null && typeof message === 'object' && Array.isArray((message as { content?: unknown }).content)
+          ? ((message as { content: Array<{ type?: unknown; text?: unknown }> }).content)
+          : []
+      const parts: string[] = []
       for (const block of blocks) {
         if (block === null || typeof block !== 'object') continue
         if (block.type === 'text' && typeof block.text === 'string') parts.push(block.text)
@@ -557,14 +608,14 @@ window.__ModuleLoader__.load({
       return parts.join('')
     }
 
-    function mostRecentSessionId(sessions) {
+    function mostRecentSessionId(sessions: SessionsSnapshotLike | undefined): string | undefined {
       if (sessions === undefined || sessions === null) return undefined
       const rows = (sessions.ids ?? [])
         .map((id) => sessions.byId?.[id])
-        .filter((row) => row !== undefined && row !== null && row.origin !== 'subagent')
+        .filter((row): row is SessionSummaryLike => row !== undefined && row !== null && row.origin !== 'subagent')
       if (rows.length === 0) return undefined
       rows.sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0))
-      return rows[0].sessionId
+      return rows[0]?.sessionId
     }
 
     const RUN_DEADLINE_MS = 240000
@@ -579,27 +630,38 @@ window.__ModuleLoader__.load({
      * and makes the wait unambiguous; the run is renamed after the card so it is
      * recognizable in the sidebar.
      */
-    function useCardRunner(opts) {
+    function useCardRunner(opts: RunnerOptions): Runner {
       const remote = opts.remote
+      const sessionRemote = remote?.session
       const uiWorkspace = opts.uiWorkspace
-      const workspacesSnapshot = typeof opts.useWorkspaces === 'function' ? opts.useWorkspaces((state) => state) : undefined
-      const sessionsSnapshot = typeof opts.useSessions === 'function' ? opts.useSessions((state) => state) : undefined
+      const workspacesSnapshot =
+        typeof opts.useWorkspaces === 'function'
+          ? (opts.useWorkspaces((state) => state) as WorkspaceSnapshotLike | undefined)
+          : undefined
+      const sessionsSnapshot =
+        typeof opts.useSessions === 'function'
+          ? (opts.useSessions((state) => state) as SessionsSnapshotLike | undefined)
+          : undefined
       const workspaces = Array.isArray(workspacesSnapshot?.items) ? workspacesSnapshot.items : []
 
-      const [presets, setPresets] = React.useState([])
-      const [catalog, setCatalog] = React.useState(null)
+      const [presets, setPresets] = React.useState<PresetLike[]>([])
+      const [catalog, setCatalog] = React.useState<ModelCatalogLike | null>(null)
       const [providerId, setProviderId] = React.useState('')
       const [modelId, setModelId] = React.useState('')
-      const modelGroups = Array.isArray(catalog?.groups) ? catalog.groups : []
+      const modelGroups: readonly ModelGroupLike[] = Array.isArray(catalog?.groups) ? catalog.groups : []
       const [workspaceId, setWorkspaceId] = React.useState('')
       const [presetId, setPresetId] = React.useState('')
-      const [phase, setPhase] = React.useState('idle')
+      const [phase, setPhase] = React.useState<RunnerPhase>('idle')
       const [answer, setAnswer] = React.useState('')
       const [failure, setFailure] = React.useState('')
       const [sessionId, setSessionId] = React.useState('')
       const [elapsed, setElapsed] = React.useState(0)
       const picked = React.useRef(false)
-      const activeRun = React.useRef(null)
+      const activeRun = React.useRef<{
+        settle: (phase: RunnerPhase, answer?: string, failure?: string, sessionId?: string) => void
+        answer: () => string
+        sessionId: string
+      } | null>(null)
 
       React.useEffect(() => {
         if (remote === undefined || typeof remote.agentPresets?.list !== 'function') return undefined
@@ -608,7 +670,7 @@ window.__ModuleLoader__.load({
           .list()
           .then((value) => {
             if (!alive) return
-            const roster = unwrap(value)
+            const roster = unwrap<{ presets?: PresetLike[] }>(value)
             const rows = (Array.isArray(roster?.presets) ? roster.presets : []).filter(
               (row) => row !== null && typeof row === 'object' && (row.broken === undefined || row.broken === ''),
             )
@@ -625,13 +687,13 @@ window.__ModuleLoader__.load({
       }, [remote])
 
       React.useEffect(() => {
-        if (remote === undefined || typeof remote.session?.modelCatalog !== 'function') return undefined
+        if (remote === undefined || typeof sessionRemote?.modelCatalog !== 'function') return undefined
         let alive = true
-        remote.session
-          .modelCatalog()
+        sessionRemote
+          ?.modelCatalog()
           .then((value) => {
             if (!alive) return
-            const data = unwrap(value)
+            const data = unwrap<ModelCatalogLike>(value)
             setCatalog(data !== null && typeof data === 'object' ? data : null)
             const preferred = data?.default
             if (preferred === undefined || typeof preferred?.provider !== 'string') return
@@ -664,9 +726,9 @@ window.__ModuleLoader__.load({
       }, [phase])
 
       const stop = () => {
-        if (sessionId === '' || typeof remote?.session?.cancel !== 'function') return
+        if (sessionId === '' || typeof sessionRemote?.cancel !== 'function') return
         try {
-          remote.session.cancel({ sessionId })
+          sessionRemote.cancel({ sessionId })
         } catch {
           // the turn may already have settled
         }
@@ -687,7 +749,7 @@ window.__ModuleLoader__.load({
        * whitespace-bounded `/name` gesture the host scans for at `agent/pre-step`,
        * so the skill body is injected into the run.
        */
-      const skillTokenOf = (card) => {
+      const skillTokenOf = (card: Card | null): string => {
         const skill = String(card?.skill ?? '')
           .trim()
           .replace(/^\//, '')
@@ -699,7 +761,7 @@ window.__ModuleLoader__.load({
        * @param card - the card being run (title, skill, id).
        * @param text - the rendered prompt.
        */
-      const run = async (card, text) => {
+      const run = async (card: Card | null, text: string): Promise<void> => {
         if (phase === 'running') return
         const skill = skillTokenOf(card)
         const sent = skill === '' ? text : skill + ' ' + text
@@ -711,15 +773,20 @@ window.__ModuleLoader__.load({
           startedAt: Date.now(),
         }
         const runId = 'run_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
-        const chunks = []
-        const seen = new Set()
+        const chunks: string[] = []
+        const seen = new Set<number>()
         let sessionIdValue = ''
 
         /**
          * Every terminal path goes through here so the run is recorded exactly once,
          * even when the popover is closed before the turn settles.
          */
-        const settle = (nextPhase, failureMessage, answerText, id) => {
+        const settle = (
+          nextPhase: RunnerPhase,
+          failureMessage?: string,
+          answerText?: string,
+          id?: string,
+        ): void => {
           setPhase(nextPhase)
           if (typeof failureMessage === 'string' && failureMessage !== '') setFailure(failureMessage)
           activeRun.current = null
@@ -739,6 +806,11 @@ window.__ModuleLoader__.load({
         }
         activeRun.current = { settle, answer: () => chunks.join('\n\n'), sessionId: '' }
 
+        if (sessionRemote === undefined) {
+          settle('error', 'remote session service is unavailable')
+          return
+        }
+
         setPhase('running')
         setAnswer('')
         setFailure('')
@@ -751,10 +823,10 @@ window.__ModuleLoader__.load({
             // a broken listener must not break the run
           }
         }
-        let created
+        let created: { sessionId?: string }
         try {
-          created = unwrap(
-            await remote.session.create({
+          created = unwrap<{ sessionId?: string }>(
+            await sessionRemote.create({
               ...(workspaceId === '' ? {} : { workspaceId }),
               ...(presetId === '' ? {} : { agentPreset: presetId }),
             }),
@@ -762,7 +834,7 @@ window.__ModuleLoader__.load({
         } catch (error) {
           // No session could be created: leave the prompt in a new composer instead.
           activeRun.current = null
-          uiWorkspace.startSession(undefined, { prompt: sent, whenDraftExists: 'append' })
+          uiWorkspace?.startSession(undefined, { prompt: sent, whenDraftExists: 'append' })
           setPhase('draft')
           return
         }
@@ -777,13 +849,13 @@ window.__ModuleLoader__.load({
         // Pin the provider/model on the fresh Session before its first turn.
         const chosenProvider = providerId
         const chosenModel = modelId
-        if (chosenProvider !== '' && chosenModel !== '' && typeof remote.session.selectModel === 'function') {
+        if (chosenProvider !== '' && chosenModel !== '' && typeof sessionRemote.selectModel === 'function') {
           const group = modelGroups.find((entry) => entry.id === chosenProvider)
-          const entry = Array.isArray(group?.models) ? group.models.find((item) => item.id === chosenModel) : undefined
+          const entry = group === undefined ? undefined : group.models.find((item) => item.id === chosenModel)
           const effort = entry?.reasoning?.defaultEffort
           try {
             unwrap(
-              await remote.session.selectModel({
+              await sessionRemote.selectModel({
                 sessionId: id,
                 provider: chosenProvider,
                 model: chosenModel,
@@ -804,10 +876,10 @@ window.__ModuleLoader__.load({
         }
         try {
           if (typeof card?.title === 'string' && card.title !== '') {
-            Promise.resolve(remote.session.rename({ sessionId: id, title: '卡片 · ' + card.title })).catch(() => {})
+            Promise.resolve(sessionRemote.rename({ sessionId: id, title: '卡片 · ' + card.title })).catch(() => {})
           }
           unwrap(
-            await remote.session.prompt({
+            await sessionRemote.prompt({
               requestId: uid(),
               sessionId: id,
               mode: 'queue',
@@ -824,10 +896,10 @@ window.__ModuleLoader__.load({
         const admittedAt = Date.now()
         let retries = 0
         for (;;) {
-          let value
+          let value: WaitValue | undefined
           try {
-            value = unwrap(
-              await remote.session.wait({
+            value = unwrap<WaitValue>(
+              await sessionRemote.wait({
                 sessionId: id,
                 timeoutMs: RUN_POLL_MS,
                 maxMessages: 200,
@@ -923,7 +995,7 @@ window.__ModuleLoader__.load({
     }
 
     /** Workspace, Agent preset, provider and model for one run; each carries a default. */
-    function RunnerTarget(props) {
+    function RunnerTarget(props: RunTargetProps) {
       const t = props.t
       const runner = props.runner
       const provider = runner.modelGroups.find((group) => group.id === runner.providerId)
@@ -939,7 +1011,7 @@ window.__ModuleLoader__.load({
             'select',
             {
               value: runner.workspaceId,
-              onChange: (event) => runner.setWorkspace(event.target.value),
+              onChange: (event) => runner.setWorkspace((event.target as HTMLInputElement).value),
               'data-skillcard-workspace': '',
             },
             runner.workspaces.length === 0
@@ -961,7 +1033,7 @@ window.__ModuleLoader__.load({
             'select',
             {
               value: runner.presetId,
-              onChange: (event) => runner.setPreset(event.target.value),
+              onChange: (event) => runner.setPreset((event.target as HTMLInputElement).value),
               'data-skillcard-preset': '',
             },
             h('option', { value: '' }, t('run.defaultPreset')),
@@ -976,7 +1048,7 @@ window.__ModuleLoader__.load({
             'select',
             {
               value: runner.providerId,
-              onChange: (event) => runner.setProvider(event.target.value),
+              onChange: (event) => runner.setProvider((event.target as HTMLInputElement).value),
               'data-skillcard-provider': '',
             },
             runner.modelGroups.length === 0
@@ -994,7 +1066,7 @@ window.__ModuleLoader__.load({
             'select',
             {
               value: runner.modelId,
-              onChange: (event) => runner.setModel(event.target.value),
+              onChange: (event) => runner.setModel((event.target as HTMLInputElement).value),
               'data-skillcard-model': '',
             },
             models.length === 0
@@ -1006,7 +1078,7 @@ window.__ModuleLoader__.load({
     }
 
     /** Live state of one run: progress, the answer, and the way to the Session. */
-    function RunResult(props) {
+    function RunResult(props: RunResultProps) {
       const t = props.t
       const runner = props.runner
       if (runner.phase === 'idle') return null
@@ -1051,8 +1123,8 @@ window.__ModuleLoader__.load({
       )
     }
     // --------------------------------------------------------------- visuals
-    function ErrorBoundary(props) {
-      const [failed, setFailed] = React.useState(null)
+    function ErrorBoundary(props: BoundaryProps) {
+      const [failed, setFailed] = React.useState<unknown>(null)
       if (failed !== null) {
         return h(
           'div',
@@ -1063,29 +1135,29 @@ window.__ModuleLoader__.load({
           messageOf(failed),
         )
       }
-      return h(BoundaryGuard, { onError: setFailed }, props.children)
+      return h(BoundaryGuard, { onError: (error: unknown) => setFailed(error) }, props.children)
     }
 
-    class BoundaryGuard extends React.Component {
-      constructor(props) {
+    class BoundaryGuard extends React.Component<{ onError?: (error: unknown) => void; children?: React.ReactNode }, { failed: boolean }> {
+      constructor(props: { onError?: (error: unknown) => void; children?: React.ReactNode }) {
         super(props)
         this.state = { failed: false }
       }
 
-      static getDerivedStateFromError() {
+      static getDerivedStateFromError(): { failed: boolean } {
         return { failed: true }
       }
 
-      componentDidCatch(error) {
+      override componentDidCatch(error: unknown): void {
         if (typeof this.props.onError === 'function') this.props.onError(error)
       }
 
-      render() {
+      override render(): React.ReactNode {
         return this.state.failed ? null : this.props.children
       }
     }
 
-    function PanelIcon(props) {
+    function PanelIcon(props: PanelIconProps) {
       const size = typeof props.size === 'number' ? props.size : 16
       const stroke = 'currentColor'
       return h(
@@ -1121,7 +1193,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function Chevron(props) {
+    function Chevron(props: ChevronProps) {
       return h(
         'svg',
         {
@@ -1136,7 +1208,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function TemplateText(props) {
+    function TemplateText(props: TemplateTextProps) {
       const template = String(props.template ?? '')
       const nodes = []
       let index = 0
@@ -1152,7 +1224,7 @@ window.__ModuleLoader__.load({
     }
 
     // ------------------------------------------------------------ dashboards
-    function CardEditor(props) {
+    function CardEditor(props: CardEditorProps) {
       const { t, initial, skills } = props
       const [title, setTitle] = React.useState(initial.title ?? '')
       const [category, setCategory] = React.useState(initial.category ?? '')
@@ -1160,13 +1232,13 @@ window.__ModuleLoader__.load({
       const [description, setDescription] = React.useState(initial.description ?? '')
       const [template, setTemplate] = React.useState(initial.template ?? '')
       const [meta, setMeta] = React.useState(() => {
-        const map = {}
+        const map: Record<string, CardVariable> = {}
         for (const variable of initial.variables ?? []) map[variable.name] = variable
         return map
       })
       const [error, setError] = React.useState('')
 
-      const names = variableNames(template)
+      const names = templateVariables(template)
       const skillNames = (skills ?? []).map((item) => item.name)
       if (skill !== '' && !skillNames.includes(skill)) skillNames.unshift(skill)
 
@@ -1201,7 +1273,7 @@ window.__ModuleLoader__.load({
         h('label', { className: 'sc-field' }, h('span', null, t('form.title')), h('input', {
           value: title,
           placeholder: t('form.titlePlaceholder'),
-          onChange: (event) => setTitle(event.target.value),
+          onChange: (event) => setTitle((event.target as HTMLInputElement).value),
           'data-skillcard-field': 'title',
         })),
         h(
@@ -1209,11 +1281,11 @@ window.__ModuleLoader__.load({
           { className: 'sc-field-row' },
           h('label', { className: 'sc-field' }, h('span', null, t('form.category')), h('input', {
             value: category,
-            onChange: (event) => setCategory(event.target.value),
+            onChange: (event) => setCategory((event.target as HTMLInputElement).value),
           })),
           h('label', { className: 'sc-field' }, h('span', null, t('form.skill')), h(
             'select',
-            { value: skill, onChange: (event) => setSkill(event.target.value) },
+            { value: skill, onChange: (event) => setSkill((event.target as HTMLInputElement).value) },
             h('option', { value: '' }, t('ai.none')),
             skillNames.map((name) => h('option', { key: name, value: name }, name)),
           ), h('small', { className: 'sc-hint' }, t('form.skillHint'))),
@@ -1221,7 +1293,7 @@ window.__ModuleLoader__.load({
         h('label', { className: 'sc-field' }, h('span', null, t('form.description')), h('textarea', {
           rows: 2,
           value: description,
-          onChange: (event) => setDescription(event.target.value),
+          onChange: (event) => setDescription((event.target as HTMLInputElement).value),
         })),
         h(
           'label',
@@ -1231,7 +1303,7 @@ window.__ModuleLoader__.load({
             rows: 5,
             value: template,
             placeholder: '使用天气技能帮我查看${地点}在${日期}的天气',
-            onChange: (event) => setTemplate(event.target.value),
+            onChange: (event) => setTemplate((event.target as HTMLInputElement).value),
             'data-skillcard-field': 'template',
           }),
           h('small', { className: 'sc-hint' }, t('form.templateHint')),
@@ -1251,13 +1323,13 @@ window.__ModuleLoader__.load({
                     value: meta[name]?.label ?? '',
                     placeholder: t('form.label'),
                     onChange: (event) =>
-                      setMeta({ ...meta, [name]: { ...(meta[name] ?? {}), label: event.target.value } }),
+                      setMeta({ ...meta, [name]: { ...(meta[name] ?? {}), label: (event.target as HTMLInputElement).value } }),
                   }),
                   h('input', {
                     value: meta[name]?.example ?? '',
                     placeholder: t('form.example'),
                     onChange: (event) =>
-                      setMeta({ ...meta, [name]: { ...(meta[name] ?? {}), example: event.target.value } }),
+                      setMeta({ ...meta, [name]: { ...(meta[name] ?? {}), example: (event.target as HTMLInputElement).value } }),
                   }),
                 ),
               ),
@@ -1272,7 +1344,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function CardDetail(props) {
+    function CardDetail(props: CardDetailProps) {
       const { t, card, onUse, onEdit, onDelete, onCopy, copied } = props
       return h(
         'div',
@@ -1307,7 +1379,7 @@ window.__ModuleLoader__.load({
         ),
       )
     }
-    function AiForm(props) {
+    function AiForm(props: AiFormProps) {
       const { t, onClose, skills, skillsMeta, onRefreshSkills } = props
       const [text, setText] = React.useState('')
       const [skill, setSkill] = React.useState('')
@@ -1346,7 +1418,7 @@ window.__ModuleLoader__.load({
           rows: 3,
           value: text,
           placeholder: t('ai.placeholder'),
-          onChange: (event) => setText(event.target.value),
+          onChange: (event) => setText((event.target as HTMLInputElement).value),
           'data-skillcard-field': 'ai-sample',
         })),
         h(
@@ -1355,7 +1427,7 @@ window.__ModuleLoader__.load({
           h('span', null, t('ai.skill')),
           h(
             'select',
-            { value: skill, onChange: (event) => setSkill(event.target.value) },
+            { value: skill, onChange: (event) => setSkill((event.target as HTMLInputElement).value) },
             h('option', { value: '' }, t('ai.none')),
             skillNames.map((name) => h('option', { key: name, value: name }, name)),
           ),
@@ -1389,15 +1461,15 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function SkillCardPage(props) {
+    function SkillCardPage(props: PageProps) {
       const store = props.store
       const t = props.t
       const snapshot = useSnapshot(store)
       const [mode, setMode] = React.useState('view')
-      const [editing, setEditing] = React.useState(null)
+      const [editing, setEditing] = React.useState<Partial<Card> | null>(null)
       const [dirAll, setDirAll] = React.useState(true)
       const [copied, setCopied] = React.useState('')
-      const [skills, setSkills] = React.useState([])
+      const [skills, setSkills] = React.useState<SkillEntryLike[]>([])
       const [skillsMeta, setSkillsMeta] = React.useState({ status: 'idle', scoped: false })
       const [busy, setBusy] = React.useState(false)
       const [filter, setFilter] = React.useState('')
@@ -1416,7 +1488,9 @@ window.__ModuleLoader__.load({
         setDirAll(expanded)
       }, [snapshot.status, snapshot.config.defaultExpanded])
 
-      const sessions = props.useSessions !== undefined ? props.useSessions((state) => state) : undefined
+      const sessions = (
+        props.useSessions !== undefined ? props.useSessions((state) => state) : undefined
+      ) as SessionsSnapshotLike | undefined
 
       const cards = snapshot.cards
       const selected = cards.find((card) => card.id === snapshot.selectedId) ?? null
@@ -1446,8 +1520,8 @@ window.__ModuleLoader__.load({
        * Skill catalog: the most recently touched session is the best stand-in for
        * "the catalog the user sees" from a root-scoped panel.
        */
-      const skillsLoadedFor = React.useRef(null)
-      const loadSkills = (sessionId) => {
+      const skillsLoadedFor = React.useRef<string | null>(null)
+      const loadSkills = (sessionId?: string): Promise<void> => {
         const scoped = typeof sessionId === 'string' && sessionId !== ''
         setSkillsMeta({ status: 'loading', scoped })
         return store
@@ -1491,7 +1565,7 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const generate = async (request) => {
+      const generate = async (request: { text: string; skill: string }): Promise<void> => {
         const prompt = [
           '请把下面这句话做成一张技能卡片（skill card）。',
           '',
@@ -1508,10 +1582,10 @@ window.__ModuleLoader__.load({
           .join('\n')
         // `startSession` opens the new Session with this instruction already in the
         // composer: one Enter sends it, and the agent saves the card through the tool.
-        props.uiWorkspace.startSession(undefined, { prompt, whenDraftExists: 'append' })
+        props.uiWorkspace?.startSession(undefined, { prompt, whenDraftExists: 'append' })
       }
 
-      const save = async (input) => {
+      const save = async (input: CardInput): Promise<void> => {
         setBusy(true)
         try {
           await store.saveCard(input)
@@ -1537,12 +1611,19 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const groups = []
-      const byCategory = new Map()
+      interface DirGroup {
+        key: string
+        label: string
+        open: boolean
+        toggle: () => void
+        cards: Card[] | null
+      }
+      const groups: DirGroup[] = []
+      const byCategory = new Map<string, Card[]>()
       for (const card of visible) {
         const key = card.category === '' ? '' : card.category
         if (!byCategory.has(key)) byCategory.set(key, [])
-        byCategory.get(key).push(card)
+        byCategory.get(key)?.push(card)
       }
       groups.push({
         key: 'all',
@@ -1552,7 +1633,7 @@ window.__ModuleLoader__.load({
         cards: null,
       })
 
-      const cardRow = (card) =>
+      const cardRow = (card: Card) =>
         h(
           'button',
           {
@@ -1626,7 +1707,7 @@ window.__ModuleLoader__.load({
               type: 'search',
               value: filter,
               placeholder: t('panel.searchPlaceholder'),
-              onChange: (event) => setFilter(event.target.value),
+              onChange: (event) => setFilter((event.target as HTMLInputElement).value),
               'data-skillcard-filter': '',
             }),
             needle !== '' && visible.length === 0 ? h('div', { className: 'sc-hint sc-dir-empty' }, t('panel.searchEmpty')) : null,
@@ -1710,11 +1791,11 @@ window.__ModuleLoader__.load({
      * search field and a keyboard-navigable list underneath. This is the "which
      * capability do I run" control of the popover.
      */
-    function CardPicker(props) {
+    function CardPicker(props: CardPickerProps) {
       const { t, selected, matches, open, query, activeIndex } = props
       const list = matches.slice(0, 14)
 
-      const onKeyDown = (event) => {
+      const onKeyDown = (event: React.KeyboardEvent): void => {
         if (event.key === 'ArrowDown') {
           event.preventDefault()
           props.setIdle(Math.min(activeIndex + 1, Math.max(list.length - 1, 0)))
@@ -1772,7 +1853,7 @@ window.__ModuleLoader__.load({
                 value: query,
                 placeholder: t('foot.searchPlaceholder'),
                 autoFocus: true,
-                onChange: (event) => props.onQuery(event.target.value),
+                onChange: (event) => props.onQuery((event.target as HTMLInputElement).value),
                 onKeyDown,
                 'data-skillcard-search': '',
               }),
@@ -1824,7 +1905,7 @@ window.__ModuleLoader__.load({
      * the execution history. Management (create/edit/delete/pin) stays in the
      * library panel; this popover never edits cards.
      */
-    function SkillCardFooter(props) {
+    function SkillCardFooter(props: FooterProps) {
       const store = props.store
       const t = props.t
       const snapshot = useSnapshot(store)
@@ -1832,7 +1913,7 @@ window.__ModuleLoader__.load({
       const [query, setQuery] = React.useState('')
       const [pickerOpen, setPickerOpen] = React.useState(false)
       const [activeIndex, setActiveIndex] = React.useState(0)
-      const [checked, setChecked] = React.useState([])
+      const [checked, setChecked] = React.useState<string[]>([])
       const [expanded, setExpanded] = React.useState('')
       const runner = useCardRunner({
         remote: props.remote,
@@ -1868,7 +1949,7 @@ window.__ModuleLoader__.load({
               skill: result.meta.skill,
               prompt: result.meta.prompt,
               answer: result.answer,
-              status: result.phase,
+              status: (result.phase === 'running' || result.phase === 'draft' ? 'interrupted' : result.phase) as RunStatus,
               error: result.failure,
               sessionId: result.sessionId,
               startedAt: result.meta.startedAt,
@@ -1900,7 +1981,7 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         if (!open) return undefined
-        const onKey = (event) => {
+        const onKey = (event: KeyboardEvent): void => {
           if (event.key === 'Escape') setOpen(false)
         }
         window.addEventListener('keydown', onKey)
@@ -1932,7 +2013,7 @@ window.__ModuleLoader__.load({
             )
       const selected = cards.find((card) => card.id === snapshot.selectedId) ?? null
       const values = selected === null ? {} : store.draftOf(selected.id)
-      const names = selected === null ? [] : variableNames(selected.template)
+      const names = selected === null ? [] : templateVariables(selected.template)
       const missing = selected === null ? [] : missingNames(selected.template, values)
       const running = runner.phase === 'running'
 
@@ -1977,7 +2058,7 @@ window.__ModuleLoader__.load({
         void store.deleteRuns(checked).then(() => setChecked([]))
       }
 
-      const toggleChecked = (id) => {
+      const toggleChecked = (id: string): void => {
         setChecked(checked.includes(id) ? checked.filter((item) => item !== id) : [...checked, id])
       }
 
@@ -2045,7 +2126,7 @@ window.__ModuleLoader__.load({
                     h('input', {
                       value: values[name] ?? '',
                       placeholder: selected.variables.find((variable) => variable.name === name)?.example ?? '',
-                      onChange: (event) => store.setValue(selected.id, name, event.target.value),
+                      onChange: (event) => store.setValue(selected.id, name, (event.target as HTMLInputElement).value),
                       'data-skillcard-input': name,
                     }),
                   ),
@@ -2072,7 +2153,7 @@ window.__ModuleLoader__.load({
                   t,
                   runner,
                   onOpenSession: (id) => {
-                    props.uiWorkspace.openSession(id)
+                    props.uiWorkspace?.openSession(id)
                     setOpen(false)
                   },
                 }),
@@ -2181,10 +2262,10 @@ window.__ModuleLoader__.load({
     }
 
     /** Compact local time for one history row. */
-    function timeLabel(value) {
+    function timeLabel(value: number | undefined): string {
       if (!Number.isFinite(value)) return ''
       try {
-        return new Date(value).toLocaleString(undefined, {
+        return new Date(Number(value)).toLocaleString(undefined, {
           month: '2-digit',
           day: '2-digit',
           hour: '2-digit',
@@ -2347,7 +2428,7 @@ window.__ModuleLoader__.load({
     }
 
     // ------------------------------------------------------------------ apply
-    return {
+    const plugin = {
       // Remote namespaces are separate inject keys: the `remote` service guard
       // refuses `remote.<namespace>` reads this fiber did not declare.
       inject: [
@@ -2359,7 +2440,7 @@ window.__ModuleLoader__.load({
         'remote.skills',
         'uiWorkspace',
       ],
-      apply(ctx) {
+      apply(ctx: ClientContext) {
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-skillcard: locale')
         ctx.effect(() => installStyles(), 'dsh-skillcard: styles')
         const t = ctx.locale.bind(NS)
@@ -2394,7 +2475,7 @@ window.__ModuleLoader__.load({
               locale: NS,
               inject: () => pageInjected,
             },
-            function SkillCardPanel(props) {
+            function SkillCardPanel(props: never) {
               return h(ErrorBoundary, { label: 'dsh-skillcard' }, h(SkillCardPage, props))
             },
           ),
@@ -2411,7 +2492,7 @@ window.__ModuleLoader__.load({
               label: () => t('foot.label'),
               inject: () => footInjected,
             },
-            function SkillCardFootEntry(props) {
+            function SkillCardFootEntry(props: never) {
               return h(ErrorBoundary, { label: 'dsh-skillcard' }, h(SkillCardFooter, props))
             },
           ),
@@ -2420,5 +2501,5 @@ window.__ModuleLoader__.load({
         void store.refresh()
       },
     }
-  },
-})
+export const inject: string[] = plugin.inject
+export const apply = plugin.apply

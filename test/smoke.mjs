@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const source = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 
 // ------------------------------------------------------------------ React shim
 const hooksByPath = new Map()
@@ -263,6 +263,9 @@ if (registration === undefined || typeof registration.factory !== 'function') {
 
 const product = registration.factory((id) => {
   if (id === 'react') return React
+  // The bundle renders floating surfaces through a body portal when react-dom is
+  // available; the harness has no DOM, so the inline fallback path is exercised.
+  if (id === 'react-dom') return {}
   throw new Error('unexpected require: ' + id)
 })
 

@@ -112,15 +112,34 @@ dsh plugin --profile web add ./dsh-skillcard-0.3.0.tgz
 > **你**：把「使用天气技能帮我查看深圳明天的天气」做成技能卡片
 > **Agent**：已保存「查天气」：`使用天气技能帮我查看${地点}在${日期}的天气`
 
+## 开发
+
+源码是 TypeScript，构建产物才是运行时：
+
+```sh
+npm install --ignore-scripts
+npm run build        # src/host.ts → lib/index.js（ESM）；src/client.ts → lib/client.js（CJS 工厂）
+npm run typecheck    # tsc --noEmit，strict
+npm test             # 构建 + 类型检查 + 冒烟测试
+```
+
+- `src/host.ts` 宿主半边（卡片库、HTTP 桥、`skillcard` 工具）
+- `src/client.ts` 浏览器半边（三个 slot、store、runner、组件）
+- `src/shared.ts` 两半共用的领域模型与模板纯函数
+- `src/contracts.d.ts` **手写**的 dsh 契约（故意不引 rc 阶段周更的 SDK 类型包，升级 dsh 不会弄崩 `tsc`）
+
+安装时请用 tarball 或 npm 包，不要用 `link:` 目录——链接安装读到的是构建前的清单，
+升级后 `main` 指向 `lib/`，链接会找不到入口。
+
 ## 自测
 
 ```sh
-node test/smoke.mjs
+npm test
 ```
 
 用最小 React 替身挂载三个 slot，点击「新建 / AI 生成 / 编辑 / 执行 / 展开历史」，断言组件树不抛错、
-中英词条齐全、默认目标正确、`/技能名` 注入生效、运行中与完成的记录都写入。它只覆盖代码路径，
-不替代浏览器里的真实观感。
+中英词条齐全、默认目标正确、`/技能名` 注入生效、运行中与完成的记录都写入。它跑的是 **lib/ 里的
+构建产物**，所以能验证构建管线本身；它只覆盖代码路径，不替代浏览器里的真实观感。
 
 ## 技术说明
 
