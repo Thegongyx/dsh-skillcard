@@ -1,6 +1,6 @@
 {
   "name": "dsh-skillcard",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Skill cards for DeepSeek Harness: turn recurring prompts into fill-in cards, run them with a chosen workspace / preset / model, and get the answer back in the card. 技能卡片：把常用提示词变成填空卡片，填完直接执行并取回答案。",
   "license": "MIT",
   "author": "Thegongyx",
@@ -20,13 +20,33 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
+    "README_en.md",
     "LICENSE"
   ],
-  "keywords": ["dsh","dsh-plugin","dsh-plugins","deepseek-harness","cordis","skill-cards","prompt-template","prompt-library","agent","web-ui"],
-  "repository": { "type": "git", "url": "git+https://github.com/Thegongyx/dsh-skillcard.git" },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-plugins",
+    "deepseek-harness",
+    "cordis",
+    "skill-cards",
+    "prompt-template",
+    "prompt-library",
+    "agent",
+    "web-ui"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Thegongyx/dsh-skillcard.git"
+  },
   "homepage": "https://github.com/Thegongyx/dsh-skillcard#readme",
-  "bugs": { "url": "https://github.com/Thegongyx/dsh-skillcard/issues" },
-  "engines": { "node": ">=20", "dsh": ">=0.2.2-rc.1" },
+  "bugs": {
+    "url": "https://github.com/Thegongyx/dsh-skillcard/issues"
+  },
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.2.2-rc.1"
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
@@ -42,13 +62,20 @@
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   },
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "immediately": true,
-      "inject": ["@deepseek-ai/dsh-client-ui-sidebar", "@deepseek-ai/dsh-client-ui-conversation"]
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
     }
   }
 }

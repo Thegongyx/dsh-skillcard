@@ -1,5 +1,7 @@
 # dsh-SkillCard · 技能卡片
 
+[中文](README.md) | [English](README_en.md)
+
 [![npm](https://img.shields.io/npm/v/dsh-skillcard?color=blue)](https://www.npmjs.com/package/dsh-skillcard)
 [![license](https://img.shields.io/npm/l/dsh-skillcard)](LICENSE)
 [![dsh plugin](https://img.shields.io/badge/dsh-plugin-4c8bf5)](https://github.com/Thegongyx/dsh-skillcard)
