@@ -1,0 +1,17 @@
+# dsh-skillcard — 技能卡片（SkillCard）
+#
+# Turns skills and recurring prompts into parameterized prompt templates
+# ("cards"): the user fills in ${placeholders} and runs the card from the
+# sidebar foot entry or the card library. Cards live in
+# <DSH_HOME>/skillcard/cards.json; the agent can read and write them through
+# the `skillcard` tool.
+#
+# Tunables:
+#   defaultExpanded    directory groups in the card library start expanded
+#   showSidebarEntry   show the quick entry beside Settings at the sidebar foot
+- insert:
+    - id: dsh-skillcard
+      name: dsh-skillcard
+      config:
+        defaultExpanded: true
+        showSidebarEntry: true
